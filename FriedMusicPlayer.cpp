@@ -11,24 +11,24 @@
 
 File audioFile;
 volatile bool audioRunning = false;
+volatile bool audioPaused = false;
 float volume = 0.5f;
 
 TaskHandle_t audioTaskHandle = NULL;
+uint64_t currentSampleRate = FRIED_SAMPLE_RATE;
 
 void audioTask(void *pvParameters)
 {
-  const uint64_t sampleInterval = 1000000 / FRIED_SAMPLE_RATE; // ~22.7us for 44.1kHz
-  const uint64_t yieldInterval = 1000000;  // yield every 1000ms
-
+  const uint64_t yieldInterval = 1000000; // 1000ms
   uint64_t previousMicros = esp_timer_get_time();
   uint64_t lastYieldMicros = previousMicros;
+  uint64_t sampleInterval = 1000000 / currentSampleRate;
 
   while (audioRunning)
   {
     uint64_t currentMicros = esp_timer_get_time();
 
-    // Play audio sample
-    if (currentMicros - previousMicros >= sampleInterval)
+    if (!audioPaused && currentMicros - previousMicros >= sampleInterval)
     {
       previousMicros += sampleInterval;
 
@@ -42,14 +42,14 @@ void audioTask(void *pvParameters)
       }
       else
       {
-        audioFile.seek(0);  // loop the audio file
+        audioFile.seek(0); // loop
       }
     }
 
-    // Yield occasionally to feed watchdog
+    // Yield occasionally
     if (currentMicros - lastYieldMicros >= yieldInterval)
     {
-      vTaskDelay(1);  // ~1ms delay
+      vTaskDelay(1); // ~1ms
       lastYieldMicros = currentMicros;
     }
   }
@@ -58,50 +58,72 @@ void audioTask(void *pvParameters)
   vTaskDelete(NULL);
 }
 
-
-void setup_audio(const char *path)
+void stop_audio()
 {
+  audioRunning = false;
+  audioPaused = false;
+
+  if (audioTaskHandle != NULL)
+  {
+    vTaskDelete(audioTaskHandle);
+    audioTaskHandle = NULL;
+  }
+
+  if (audioFile)
+  {
+    audioFile.close();
+  }
+
+  dacWrite(SPEAKER_PIN, 0);
+}
+
+void start_audio(const char *path, uint32_t sampleRate = FRIED_SAMPLE_RATE)
+{
+  stop_audio(); // in case something's already playing
+
   pinMode(SPEAKER_PIN, OUTPUT);
 
   if (!SD.begin())
   {
     Serial.println("SD init failed!");
-    while (1)
-      ;
+    while (1);
   }
 
   audioFile = SD.open(path);
   if (!audioFile)
   {
     Serial.println("Failed to open audio file");
-    while (1)
-      ;
+    while (1);
   }
-  Serial.println("Audio setup complete!");
 
+  currentSampleRate = sampleRate;
+  audioPaused = false;
   audioRunning = true;
 
   xTaskCreatePinnedToCore(
-      audioTask,       // task function
-      "AudioTask",     // name
-      2048,            // stack size
-      NULL,            // parameters
-      1,               // priority
-      &audioTaskHandle, // task handle
-      0                // core 0
+      audioTask,
+      "AudioTask",
+      2048,
+      NULL,
+      1,
+      &audioTaskHandle,
+      0
   );
 }
 
-void stop_audio()
+void pause_audio()
 {
-  if (audioRunning)
-  {
-    audioRunning = false;
-  }
+  audioPaused = true;
 }
-void set_audio_volume(float newVolume) {
+
+void resume_audio()
+{
+  audioPaused = false;
+}
+
+void set_audio_volume(float newVolume)
+{
   if (newVolume < 0.0f) newVolume = 0.0f;
   if (newVolume > 1.0f) newVolume = 1.0f;
   volume = newVolume;
 }
-
