@@ -14,7 +14,7 @@ call `start_audio` with the path to the raw file (export from audacity) and a sa
 ```
 void setup() {
   Serial.begin(115200);
-  setup_audio("/rickroll.raw", 44100); //44100 could be ommited because thats already the default but like this you can override it per track
+  start_audio("/rickroll.raw", 44100); //44100 could be ommited because thats already the default but like this you can override it per track
   set_audio_volume(0.1f);
 }
 
